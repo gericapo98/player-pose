@@ -116,6 +116,41 @@ def test_redetect_rejects_partial_and_wrong_sized_candidates():
     assert tracker.tracks[0].last_box[3] - tracker.tracks[0].last_box[1] == 120  # box untouched
 
 
+def test_redetect_assigns_jointly_so_a_neighbour_cannot_be_stolen():
+    # two adjacent players (doubles partners), boxes overlapping IoU ~0.26
+    tracker = SORTTracker(min_hits=3)
+    a = lambda f: det(f, 600, 200, 660, 320)
+    b = lambda f: det(f, 635, 200, 695, 320)
+    for f in range(5):
+        tracker.update([a(f), b(f)])
+    # Vision misses both; every crop only finds B
+    out = tracker.update([], redetect=lambda _: [b(5)])
+    assert [(p.track_id, p.detection.box[0]) for p in out] == [(2, 635.0)]
+    # next frame both are back: identities intact, no new track
+    out = tracker.update([a(6), b(6)])
+    assert [p.track_id for p in out] == [1, 2]
+    assert len(tracker.tracks) == 2
+
+
+def test_partial_skeleton_inside_a_player_does_not_spawn_a_duplicate():
+    tracker = SORTTracker(min_hits=3)
+    full = lambda f: det(f, 600, 200, 660, 320)
+    for f in range(5):
+        tracker.update([full(f)])
+    for f in range(5, 12):  # Vision only sees head+shoulders; the crop finds the whole player
+        out = tracker.update([det(f, 600, 200, 660, 235, joints=8)], redetect=lambda _: [full(f)])
+        assert [(p.track_id, p.detection.box[3]) for p in out] == [(1, 320.0)]
+    assert len(tracker.tracks) == 1
+
+
+def test_warmup_frames_report_but_do_not_confirm():
+    tracker = SORTTracker(min_hits=3, tentative_max_age=3)
+    assert [p.track_id for p in tracker.update([det(0, 100, 100, 200, 300)])] == [1]  # reported in warm-up
+    for _ in range(4):
+        tracker.update([])
+    assert tracker.tracks == []  # never confirmed, so dropped like any tentative track
+
+
 def test_redetect_ignores_candidates_already_matched():
     tracker = SORTTracker(min_hits=1)
     near_box = lambda f: det(f, 100, 400, 180, 600)

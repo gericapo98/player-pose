@@ -7,6 +7,7 @@ frame,track_id,joint,x,y,confidence  — x,y are empty when the joint was not fo
 import csv
 import sys
 from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,35 @@ import numpy as np
 from player_pose.pose import JOINT_NAMES, PoseDetection, VisionPoseDetector
 from player_pose.sort import SORTTracker, TrackedPose
 from player_pose.video import iter_frames, video_info
+
+
+def iter_tracked(
+    video_file: str | Path,
+    detector: VisionPoseDetector,
+    tracker: SORTTracker | None,
+    redetect: bool = True,
+    min_height: float = 0.0,
+) -> Iterator[tuple[int, list[TrackedPose]]]:
+    """Yield (frame_index, tracked poses) for every frame, in order.
+
+    With tracker=None the track_id is just the detection's index within its
+    frame — raw Vision output, useful for inspecting the detector on its own.
+    With redetect=True, a track that Vision missed this frame is looked for again
+    in a crop around where the tracker last saw it. People whose box is shorter
+    than `min_height` × frame height are ignored (spectators, officials).
+    """
+    min_px = min_height * video_info(video_file)["height"]
+
+    def tall_enough(dets: list[PoseDetection]) -> list[PoseDetection]:
+        return [d for d in dets if d.box[3] - d.box[1] >= min_px]
+
+    for idx, frame in iter_frames(video_file):
+        detections = tall_enough(detector.detect(frame, idx))
+        if tracker is None:
+            yield idx, [TrackedPose(track_id=i, detection=d) for i, d in enumerate(detections)]
+        else:
+            redetect_fn = (lambda box: tall_enough(detector.detect_roi(frame, idx, box))) if redetect else None
+            yield idx, tracker.update(detections, redetect=redetect_fn)
 
 
 def track_video(
@@ -24,34 +54,16 @@ def track_video(
     min_height: float = 0.0,
     progress: bool = True,
 ) -> list[TrackedPose]:
-    """Run detection (and tracking, unless `tracker` is None) over every frame.
-
-    With tracker=None the track_id is just the detection's index within its
-    frame — raw Vision output, useful for inspecting the detector on its own.
-    With redetect=True, a track that Vision missed this frame is looked for again
-    in a crop around where the tracker last saw it. People whose box is shorter
-    than `min_height` × frame height are ignored (spectators, officials).
-    """
-    info = video_info(video_file)
-    num_frames = info["num_frames"]
-    min_px = min_height * info["height"]
-
-    def tall_enough(dets: list[PoseDetection]) -> list[PoseDetection]:
-        return [d for d in dets if d.box[3] - d.box[1] >= min_px]
-
+    """`iter_tracked` collected into one list, with a progress line on stderr."""
+    expected = video_info(video_file)["num_frames"]
     poses: list[TrackedPose] = []
-    for idx, frame in iter_frames(video_file):
-        detections = tall_enough(detector.detect(frame, idx))
-        if tracker is None:
-            tracked = [TrackedPose(track_id=i, detection=d) for i, d in enumerate(detections)]
-        else:
-            redetect_fn = (lambda box: tall_enough(detector.detect_roi(frame, idx, box))) if redetect else None
-            tracked = tracker.update(detections, redetect=redetect_fn)
+    idx = -1
+    for idx, tracked in iter_tracked(video_file, detector, tracker, redetect=redetect, min_height=min_height):
         poses.extend(tracked)
-        if progress and (idx % 50 == 0 or idx == num_frames - 1):
-            print(f"\r{idx + 1}/{num_frames} frames", end="", file=sys.stderr, flush=True)
+        if progress and idx % 50 == 0:
+            print(f"\r{idx + 1}/{expected} frames", end="", file=sys.stderr, flush=True)
     if progress:
-        print(file=sys.stderr)
+        print(f"\r{idx + 1} frames", file=sys.stderr)
     return poses
 
 

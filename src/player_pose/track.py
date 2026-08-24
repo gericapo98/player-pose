@@ -8,10 +8,11 @@ come from SORT. Output CSV columns: frame,track_id,joint,x,y,confidence.
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
-from player_pose.infer import track_video, write_csv
+from player_pose.infer import iter_tracked, write_csv
 from player_pose.pose import VisionPoseDetector
 from player_pose.sort import SORTTracker
 from player_pose.video import video_info
@@ -32,26 +33,34 @@ def main() -> None:
     parser.add_argument("--no-track", action="store_true",
                         help="skip SORT: raw Vision output, track_id is the detection index within the frame")
     parser.add_argument("--no-redetect", action="store_true",
-                        help="don't re-run Vision on an upscaled crop when a tracked player goes missing")
+                        help="don't re-run Vision on a crop when a tracked player goes missing")
     parser.add_argument("-o", "--out", help="output CSV path (default: <video stem>_poses.csv)")
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args()
+
+    out_path = Path(args.out) if args.out else Path(args.video).with_name(f"{Path(args.video).stem}_poses.csv")
+    if out_path.is_dir() or not out_path.parent.is_dir():
+        parser.error(f"cannot write {out_path}: not a writable file path")
+    info = video_info(args.video)  # fails early if the video cannot be opened
 
     detector = VisionPoseDetector(min_joint_confidence=args.min_joint_confidence, min_joints=args.min_joints)
     tracker = None if args.no_track else SORTTracker(
         iou_threshold=args.iou_threshold, max_age=args.max_age, min_hits=args.min_hits)
 
     start = time.perf_counter()
-    poses = track_video(args.video, detector, tracker, redetect=not args.no_redetect,
-                        min_height=args.min_height, progress=not args.quiet)
+    poses, frames = [], 0
+    for idx, tracked in iter_tracked(args.video, detector, tracker,
+                                     redetect=not args.no_redetect, min_height=args.min_height):
+        poses.extend(tracked)
+        frames = idx + 1
+        if not args.quiet and idx % 50 == 0:
+            print(f"\r{frames}/{info['num_frames']} frames", end="", file=sys.stderr, flush=True)
     elapsed = time.perf_counter() - start
 
-    out_path = Path(args.out) if args.out else Path(args.video).with_name(f"{Path(args.video).stem}_poses.csv")
     write_csv(poses, out_path)
     if not args.quiet:
-        info = video_info(args.video)
-        print(f"wrote {out_path} — {info['num_frames']} frames in {elapsed:.1f}s "
-              f"({info['num_frames'] / elapsed:.1f} frames/s, video is {info['fps']:.0f} fps)")
+        print(f"\rwrote {out_path} — {frames} frames in {elapsed:.1f}s "
+              f"({frames / max(elapsed, 1e-9):.1f} frames/s, video is {info['fps']:.0f} fps)", file=sys.stderr)
 
 
 if __name__ == "__main__":

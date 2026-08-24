@@ -7,6 +7,7 @@ can be swapped for a Core ML model later without touching the rest of the pipeli
 from dataclasses import dataclass
 
 import cv2
+import Foundation
 import numpy as np
 import Quartz
 import Vision
@@ -70,8 +71,12 @@ class VisionPoseDetector:
 
     def _cgimage(self, frame_bgr: np.ndarray):
         height, width = frame_bgr.shape[:2]
-        data = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA).tobytes()
-        provider = Quartz.CGDataProviderCreateWithData(None, data, len(data), None)
+        bgra = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
+        # Copy into an NSData that Core Graphics owns outright. Handing pyobjc a
+        # Python buffer via CGDataProviderCreateWithData retains it forever (one
+        # frame leaked per call); an autoreleased NSData would pile up the same way.
+        data = Foundation.NSData.alloc().initWithBytes_length_(bgra, bgra.nbytes)
+        provider = Quartz.CGDataProviderCreateWithCFData(data)
         return Quartz.CGImageCreate(
             width, height, 8, 32, width * 4, self._colorspace,
             Quartz.kCGBitmapByteOrder32Little | Quartz.kCGImageAlphaNoneSkipFirst,

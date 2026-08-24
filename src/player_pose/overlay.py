@@ -2,6 +2,7 @@
 
     player-pose-overlay rally.mp4 rally_poses.csv                        # writes rally_poses.mp4
     player-pose-overlay rally.mp4 rally_poses.csv --ball rally_ball.csv  # + shuttle from tracknet-track
+    player-pose-overlay rally.mp4 rally_poses.csv -o checked.mp4
 
 Each player keeps one colour for the whole clip; joints Vision did not find are
 simply not drawn. `--ball` takes the Frame,Visibility,X,Y CSV that tracknet-track
@@ -32,8 +33,8 @@ SKELETON = [
 ]
 _EDGES = [(JOINT_NAMES.index(a), JOINT_NAMES.index(b)) for a, b in SKELETON]
 
-# BGR, chosen to stay apart from the green court and the yellow/red ball marker
-_PALETTE = [(255, 200, 0), (0, 0, 255), (255, 0, 255), (0, 255, 0), (255, 255, 0), (0, 128, 255)]
+# BGR; no red, yellow or green so players never share a colour with the ball marker or the court
+_PALETTE = [(255, 200, 0), (255, 0, 255), (255, 255, 0), (255, 0, 128), (255, 255, 255), (200, 120, 255)]
 
 
 def track_color(track_id: int) -> tuple[int, int, int]:
@@ -92,15 +93,22 @@ def render_overlay(
     progress: bool = True,
 ) -> Path:
     """Write a copy of the video with skeletons, player IDs and (optionally) the ball drawn on it."""
+    out_file = Path(out_file)
+    if out_file.resolve() == Path(video_file).resolve():
+        raise ValueError(f"output path is the input video: {out_file}")
+    if not out_file.parent.is_dir():
+        raise FileNotFoundError(f"output directory does not exist: {out_file.parent}")
+    if out_file.suffix.lower() != ".mp4":
+        raise ValueError(f"output must be an .mp4 file, got {out_file.name}")
+
     cap = cv2.VideoCapture(str(video_file))
     if not cap.isOpened():
         raise FileNotFoundError(f"cannot open video: {video_file}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    expected = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    out_file = Path(out_file)
     writer = None
     for fourcc in ("avc1", "mp4v"):  # H.264 when the OS backend provides it
         writer = cv2.VideoWriter(str(out_file), cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
@@ -109,7 +117,7 @@ def render_overlay(
         writer.release()
         writer = None
     if writer is None:
-        raise RuntimeError("could not open a video writer for .mp4 output")
+        raise RuntimeError(f"could not open a video writer for {out_file} (tried avc1, mp4v)")
 
     by_frame: dict[int, list[TrackedPose]] = defaultdict(list)
     for p in poses:
@@ -130,11 +138,11 @@ def render_overlay(
                 trail.pop(0)
             draw_ball(frame, trail, scale)
         writer.write(frame)
-        if progress and (idx % 50 == 0 or idx == num_frames - 1):
-            print(f"\r{idx + 1}/{num_frames} frames", end="", file=sys.stderr, flush=True)
+        if progress and idx % 50 == 0:
+            print(f"\r{idx + 1}/{expected} frames", end="", file=sys.stderr, flush=True)
         idx += 1
     if progress:
-        print(file=sys.stderr)
+        print(f"\r{idx} frames", file=sys.stderr)
 
     cap.release()
     writer.release()
@@ -147,11 +155,11 @@ def main() -> None:
     parser.add_argument("csv", help="pose CSV written by player-pose-track")
     parser.add_argument("--ball", help="optional Frame,Visibility,X,Y CSV from tracknet-track")
     parser.add_argument("--traj-len", type=int, default=8, help="ball trail length in frames")
-    parser.add_argument("-o", "--out", help="output video path (default: <csv stem>.mp4)")
+    parser.add_argument("-o", "--out", help="output video path (default: <video stem>_poses.mp4)")
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args()
 
-    out_path = Path(args.out) if args.out else Path(args.csv).with_suffix(".mp4")
+    out_path = Path(args.out) if args.out else Path(args.video).with_name(f"{Path(args.video).stem}_poses.mp4")
     ball = read_ball_csv(args.ball) if args.ball else None
     render_overlay(args.video, read_csv(args.csv), out_path, ball=ball,
                    traj_len=args.traj_len, progress=not args.quiet)
