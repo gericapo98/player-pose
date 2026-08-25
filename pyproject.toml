@@ -1,6 +1,6 @@
 [project]
 name = "player-pose"
-version = "0.1.0"
+version = "1.0.1b1"
 description = "Player pose tracking for sports video on Apple Silicon: Apple Vision body pose + SORT, per-frame CSV and overlay"
 readme = "README.md"
 license = { file = "LICENSE" }

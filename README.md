@@ -1,5 +1,8 @@
 # player-pose
 
+[![Latest release](https://img.shields.io/github/v/release/gericapo98/player-pose)](https://github.com/gericapo98/player-pose/releases/latest)
+[![Pre-release](https://img.shields.io/github/v/release/gericapo98/player-pose?include_prereleases&label=pre-release)](https://github.com/gericapo98/player-pose/releases)
+
 Track player poses in sports video on Apple Silicon. Uses Apple Vision's built-in
 multi-person body pose (runs on the Neural Engine, no model files to download) and a
 SORT tracker so each player keeps a stable ID across frames. Writes a per-frame CSV
@@ -71,6 +74,15 @@ followed; a camera cut starts new IDs.
 - Tracking is motion-only (no appearance model): fine for 2–4 players on a fixed
   camera; broadcast footage with moving cameras or many same-kit players would need
   camera-motion compensation and re-identification on top.
+
+## Releases
+
+[v1.0.0](https://github.com/gericapo98/player-pose/releases/tag/v1.0.0) is the
+stable release. [v1.0.1-beta.1](https://github.com/gericapo98/player-pose/releases/tag/v1.0.1-beta.1)
+carries bug fixes (a memory leak, an overlay-overwrite risk, and two tracking
+correctness fixes — see [CHANGELOG.md](CHANGELOG.md)) found by review after
+v1.0.0 shipped; it's marked pre-release pending further validation on more
+clips, not because the fixes are in doubt. `master` always has the latest work.
 
 ## License
 
